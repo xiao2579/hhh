@@ -1,0 +1,1006 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>巴法云MQTT客户端 - 设备管理</title>
+    <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.8/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#165DFF',
+                        secondary: '#00B42A',
+                        danger: '#F53F3F',
+                        warning: '#FF7D00',
+                        dark: '#1D2129',
+                        'dark-light': '#2B2F36',
+                        'gray-light': '#C9CDD4',
+                    },
+                    fontFamily: {
+                        inter: ['Inter', 'sans-serif'],
+                    },
+                }
+            }
+        }
+    </script>
+    
+    <style type="text/tailwindcss">
+        @layer utilities {
+            .content-auto {
+                content-visibility: auto;
+            }
+            .scrollbar-hide {
+                -ms-overflow-style: none;
+                scrollbar-width: none;
+            }
+            .scrollbar-hide::-webkit-scrollbar {
+                display: none;
+            }
+            .bg-gradient-primary {
+                background: linear-gradient(135deg, #165DFF 0%, #4080FF 100%);
+            }
+            .text-shadow {
+                text-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            }
+            .card-hover {
+                transition: all 0.3s ease;
+            }
+            .card-hover:hover {
+                transform: translateY(-5px);
+                box-shadow: 0 10px 25px -5px rgba(22, 93, 255, 0.1);
+            }
+            .device-status-indicator {
+                width: 12px;
+                height: 12px;
+                border-radius: 50%;
+                display: inline-block;
+                margin-right: 8px;
+            }
+            .device-status-indicator.online {
+                background-color: #00B42A;
+                animation: pulse 2s infinite;
+            }
+            .device-status-indicator.offline {
+                background-color: #86909C;
+            }
+            @keyframes pulse {
+                0% {
+                    box-shadow: 0 0 0 0 rgba(0, 180, 42, 0.4);
+                }
+                70% {
+                    box-shadow: 0 0 0 6px rgba(0, 180, 42, 0);
+                }
+                100% {
+                    box-shadow: 0 0 0 0 rgba(0, 180, 42, 0);
+                }
+            }
+            .toggle-switch {
+                position: relative;
+                display: inline-block;
+                width: 56px;
+                height: 28px;
+            }
+            .toggle-switch input {
+                opacity: 0;
+                width: 0;
+                height: 0;
+            }
+            .toggle-slider {
+                position: absolute;
+                cursor: pointer;
+                top: 0;
+                left: 0;
+                right: 0;
+                bottom: 0;
+                background-color: #86909C;
+                transition: .4s;
+                border-radius: 34px;
+            }
+            .toggle-slider:before {
+                position: absolute;
+                content: "";
+                height: 20px;
+                width: 20px;
+                left: 4px;
+                bottom: 4px;
+                background-color: white;
+                transition: .4s;
+                border-radius: 50%;
+            }
+            input:checked + .toggle-slider {
+                background-color: #00B42A;
+            }
+            input:focus + .toggle-slider {
+                box-shadow: 0 0 1px #00B42A;
+            }
+            input:checked + .toggle-slider:before {
+                transform: translateX(28px);
+            }
+            .volume-slider {
+                -webkit-appearance: none;
+                height: 6px;
+                border-radius: 5px;
+                background: #374151;
+                outline: none;
+                opacity: 0.7;
+                -webkit-transition: .2s;
+                transition: opacity .2s;
+            }
+            .volume-slider::-webkit-slider-thumb {
+                -webkit-appearance: none;
+                appearance: none;
+                width: 18px;
+                height: 18px;
+                border-radius: 50%;
+                background: #165DFF;
+                cursor: pointer;
+            }
+            .volume-slider::-moz-range-thumb {
+                width: 18px;
+                height: 18px;
+                border-radius: 50%;
+                background: #165DFF;
+                cursor: pointer;
+            }
+            .volume-slider:hover {
+                opacity: 1;
+            }
+        }
+    </style>
+</head>
+<body class="font-inter bg-gradient-to-br from-dark to-dark-light text-white min-h-screen">
+    <div class="container mx-auto px-4 py-8 max-w-7xl">
+        <!-- 头部 -->
+        <header class="mb-8 text-center">
+            <h1 class="text-[clamp(1.8rem,5vw,2.5rem)] font-bold bg-clip-text text-transparent bg-gradient-to-r from-primary to-blue-400 mb-2">
+                巴法云MQTT设备管理平台
+            </h1>
+            <p class="text-gray-light text-lg max-w-2xl mx-auto">
+                集中管理和监控您的物联网设备，实时查看设备状态并进行远程控制
+            </p>
+        </header>
+        
+        <!-- 连接配置卡片 -->
+        <div class="bg-dark-light rounded-xl shadow-lg p-6 card-hover mb-8 max-w-3xl mx-auto">
+            <div class="flex items-center mb-4">
+                <div class="w-10 h-10 rounded-full bg-primary/20 flex items-center justify-center mr-3">
+                    <i class="fa fa-plug text-primary text-xl"></i>
+                </div>
+                <h2 class="text-xl font-semibold">MQTT连接配置</h2>
+            </div>
+            
+            <div class="space-y-4">
+                <div>
+                    <label for="clientId" class="block text-sm font-medium text-gray-light mb-1">ClientID (私钥)</label>
+                    <div class="relative">
+                        <span class="absolute inset-y-0 left-0 flex items-center pl-3 text-gray-light">
+                            <i class="fa fa-key"></i>
+                        </span>
+                        <input type="text" id="clientId" placeholder="从巴法云控制台获取" 
+                            class="w-full bg-dark border border-gray-700 rounded-lg py-3 pl-10 pr-4 focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all">
+                    </div>
+                </div>
+                
+                <div class="flex space-x-3 pt-2">
+                    <button id="connectBtn" onclick="connect()" 
+                        class="flex-1 bg-primary hover:bg-primary/90 text-white font-medium py-3 px-4 rounded-lg transition-all flex items-center justify-center">
+                        <i class="fa fa-wifi mr-2"></i> 连接MQTT
+                    </button>
+                    <button id="disconnectBtn" onclick="disconnect()" disabled
+                        class="flex-1 bg-danger/20 hover:bg-danger/30 text-danger font-medium py-3 px-4 rounded-lg transition-all flex items-center justify-center">
+                        <i class="fa fa-power-off mr-2"></i> 断开连接
+                    </button>
+                </div>
+                
+                <!-- 状态指示器 -->
+                <div class="mt-4">
+                    <div class="flex items-center">
+                        <div id="statusIcon" class="w-3 h-3 rounded-full bg-gray-500 mr-2"></div>
+                        <span id="statusText" class="text-sm font-medium">未连接</span>
+                    </div>
+                    <div id="connectionInfo" class="text-xs text-gray-400 mt-1 hidden">
+                        已连接到: bemfa.com:9504
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- 设备管理区域 -->
+        <div class="mb-8">
+            <div class="flex items-center justify-between mb-6">
+                <h2 class="text-2xl font-semibold">
+                    <i class="fa fa-th-large text-primary mr-2"></i> 设备管理
+                </h2>
+                <div class="flex items-center space-x-3">
+                    <div class="relative">
+                        <span class="absolute inset-y-0 left-0 flex items-center pl-3 text-gray-light">
+                            <i class="fa fa-search"></i>
+                        </span>
+                        <input type="text" id="deviceSearch" placeholder="搜索设备..." 
+                            class="bg-dark-light border border-gray-700 rounded-lg py-2 pl-10 pr-4 focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all text-sm">
+                    </div>
+                    <button id="addDeviceBtn" onclick="addDeviceModal()" 
+                        class="bg-primary hover:bg-primary/90 text-white font-medium py-2 px-4 rounded-lg transition-all flex items-center justify-center text-sm">
+                        <i class="fa fa-plus mr-2"></i> 添加设备
+                    </button>
+                </div>
+            </div>
+            
+            <!-- 设备网格 -->
+            <div id="devicesGrid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+                <!-- 设备卡片将通过JavaScript动态生成 -->
+                <div class="text-center text-gray-400 italic py-12 col-span-full">
+                    <div class="w-16 h-16 mx-auto mb-4 bg-primary/10 rounded-full flex items-center justify-center">
+                        <i class="fa fa-plug text-primary text-2xl"></i>
+                    </div>
+                    <p>尚未添加任何设备</p>
+                    <p class="text-xs mt-2">连接MQTT后，点击"添加设备"按钮添加您的物联网设备</p>
+                </div>
+            </div>
+        </div>
+        
+        <!-- 消息日志卡片 -->
+        <div class="bg-dark-light rounded-xl shadow-lg p-6 card-hover mb-8">
+            <div class="flex items-center justify-between mb-4">
+                <div class="flex items-center">
+                    <div class="w-10 h-10 rounded-full bg-primary/20 flex items-center justify-center mr-3">
+                        <i class="fa fa-history text-primary text-xl"></i>
+                    </div>
+                    <h2 class="text-xl font-semibold">消息日志</h2>
+                </div>
+                <div class="flex items-center text-xs text-gray-400">
+                    <span id="messageCount">0</span> 条消息
+                    <button id="clearMessagesBtn" onclick="clearMessages()" class="ml-3 text-gray-400 hover:text-white transition-colors">
+                        <i class="fa fa-trash"></i> 清空
+                    </button>
+                </div>
+            </div>
+            
+            <!-- 消息列表 -->
+            <div id="messages" class="bg-dark rounded-lg h-48 overflow-y-auto scrollbar-hide p-4 space-y-2">
+                <div class="text-center text-gray-400 italic text-sm py-6">
+                    暂无消息
+                </div>
+            </div>
+        </div>
+        
+        <!-- 页脚 -->
+        <footer class="mt-12 text-center text-gray-400 text-sm">
+            <p>© 2025 巴法云MQTT设备管理平台 | 使用 Tailwind CSS 和 Font Awesome 构建</p>
+        </footer>
+    </div>
+    
+    <!-- 添加设备模态框 -->
+    <div id="addDeviceModal" class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 hidden">
+        <div class="bg-dark-light rounded-xl shadow-2xl p-6 max-w-md w-full mx-4 transform transition-all">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-xl font-semibold">添加新设备</h3>
+                <button onclick="closeAddDeviceModal()" class="text-gray-400 hover:text-white">
+                    <i class="fa fa-times"></i>
+                </button>
+            </div>
+            
+            <div class="space-y-4">
+                <div>
+                    <label for="deviceName" class="block text-sm font-medium text-gray-light mb-1">设备名称</label>
+                    <input type="text" id="deviceName" placeholder="例如：客厅音响" 
+                        class="w-full bg-dark border border-gray-700 rounded-lg py-3 px-4 focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all">
+                </div>
+                
+                <div>
+                    <label for="deviceTopic" class="block text-sm font-medium text-gray-light mb-1">设备Topic</label>
+                    <input type="text" id="deviceTopic" placeholder="例如：livingroom_speaker" 
+                        class="w-full bg-dark border border-gray-700 rounded-lg py-3 px-4 focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all">
+                </div>
+                
+                <div>
+                    <label for="deviceGroup" class="block text-sm font-medium text-gray-light mb-1">设备分组</label>
+                    <input type="text" id="deviceGroup" placeholder="例如：客厅设备" 
+                        class="w-full bg-dark border border-gray-700 rounded-lg py-3 px-4 focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all">
+                </div>
+                
+                <div class="flex space-x-3 pt-2">
+                    <button onclick="closeAddDeviceModal()" 
+                        class="flex-1 bg-gray-700 hover:bg-gray-600 text-white font-medium py-3 px-4 rounded-lg transition-all">
+                        取消
+                    </button>
+                    <button onclick="addDevice()" 
+                        class="flex-1 bg-primary hover:bg-primary/90 text-white font-medium py-3 px-4 rounded-lg transition-all">
+                        添加设备
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let client = null;
+        let connectionStartTime = null;
+        let connectionTimer = null;
+        let messagesCount = 0;
+        let devices = [];
+        let deviceStatusTimers = {};
+        
+        const options = {
+            protocol: 'wss',
+            host: 'bemfa.com',
+            port: 9504,
+            path: '/wss',
+            clientId: '',
+            clean: true,
+            connectTimeout: 4000,
+            reconnectPeriod: 4000
+        };
+
+        function connect() {
+            const clientId = document.getElementById('clientId').value.trim();
+            
+            if (!clientId) {
+                showNotification('请输入ClientID', 'warning');
+                return;
+            }
+            
+            options.clientId = clientId;
+            
+            // 更新UI状态
+            updateConnectionStatus('connecting');
+            
+            client = mqtt.connect(options);
+            
+            client.on('connect', () => {
+                connectionStartTime = new Date();
+                startConnectionTimer();
+                
+                document.getElementById('connectionInfo').classList.remove('hidden');
+                document.getElementById('connectionInfo').textContent = `已连接到: ${options.host}:${options.port}`;
+                
+                updateConnectionStatus('connected');
+                showNotification(`已成功连接到MQTT服务器`, 'success');
+                
+                // 订阅所有已添加设备的主题
+                devices.forEach(device => {
+                    subscribeToDeviceTopic(device.topic);
+                });
+            });
+
+            client.on('message', (topic, message) => {
+                messagesCount++;
+                document.getElementById('messageCount').textContent = messagesCount;
+                
+                try {
+                    // 尝试解析JSON消息
+                    const jsonMessage = JSON.parse(message.toString());
+                    
+                    // 检查是否是心跳消息
+                    if (jsonMessage.type === 'heartbeat') {
+                        // 更新设备状态
+                        const device = devices.find(d => d.topic === topic);
+                        if (device) {
+                            updateDeviceStatus(device.id, jsonMessage.status);
+                            
+                            // 清除之前的离线计时器
+                            if (deviceStatusTimers[device.id]) {
+                                clearTimeout(deviceStatusTimers[device.id]);
+                            }
+                            
+                            // 设置新的离线计时器（如果60秒内没有收到心跳，标记为离线）
+                            deviceStatusTimers[device.id] = setTimeout(() => {
+                                updateDeviceStatus(device.id, 'offline');
+                                addMessage(topic, '设备离线（心跳超时）', 'system');
+                            }, 60000);
+                            
+                            // 更新设备音量
+                            if (jsonMessage.volume !== undefined) {
+                                updateDeviceVolume(device.id, jsonMessage.volume);
+                            }
+                            
+                            // 更新设备状态信息
+                            if (jsonMessage.statusInfo) {
+                                updateDeviceStatusInfo(device.id, jsonMessage.statusInfo);
+                            }
+                        }
+                    }
+                    
+                    addMessage(topic, JSON.stringify(jsonMessage, null, 2), 'incoming');
+                } catch (e) {
+                    // 如果不是JSON消息，按普通文本处理
+                    addMessage(topic, message.toString(), 'incoming');
+                }
+            });
+
+            client.on('error', (err) => {
+                updateConnectionStatus('disconnected');
+                showNotification(`连接错误: ${err.message}`, 'error');
+            });
+            
+            client.on('close', () => {
+                if (connectionStatus !== 'disconnected') {
+                    updateConnectionStatus('disconnected');
+                    showNotification('连接已关闭', 'warning');
+                    
+                    // 重置所有设备状态为离线
+                    devices.forEach(device => {
+                        updateDeviceStatus(device.id, 'offline');
+                    });
+                }
+            });
+            
+            client.on('reconnect', () => {
+                updateConnectionStatus('reconnecting');
+            });
+        }
+
+        function disconnect() {
+            if (client && client.connected) {
+                client.end();
+                updateConnectionStatus('disconnected');
+                stopConnectionTimer();
+                showNotification('已断开连接', 'info');
+                
+                // 重置所有设备状态为离线
+                devices.forEach(device => {
+                    updateDeviceStatus(device.id, 'offline');
+                });
+            }
+        }
+        
+        function addDeviceModal() {
+            if (!client || !client.connected) {
+                showNotification('请先连接MQTT服务器', 'warning');
+                return;
+            }
+            
+            document.getElementById('addDeviceModal').classList.remove('hidden');
+            document.getElementById('deviceName').focus();
+        }
+        
+        function closeAddDeviceModal() {
+            document.getElementById('addDeviceModal').classList.add('hidden');
+            document.getElementById('deviceName').value = '';
+            document.getElementById('deviceTopic').value = '';
+            document.getElementById('deviceGroup').value = '';
+        }
+        
+        function addDevice() {
+            const deviceName = document.getElementById('deviceName').value.trim();
+            const deviceTopic = document.getElementById('deviceTopic').value.trim();
+            const deviceGroup = document.getElementById('deviceGroup').value.trim() || '未分组';
+            
+            if (!deviceName || !deviceTopic) {
+                showNotification('请输入设备名称和Topic', 'warning');
+                return;
+            }
+            
+            // 检查是否已存在相同Topic的设备
+            if (devices.some(device => device.topic === deviceTopic)) {
+                showNotification('已存在相同Topic的设备', 'warning');
+                return;
+            }
+            
+            // 创建新设备对象但不立即添加到设备列表
+            const newDevice = {
+                id: Date.now().toString(),
+                name: deviceName,
+                topic: deviceTopic,
+                group: deviceGroup,
+                status: 'offline',
+                lastSeen: null,
+                volume: 50,
+                statusInfo: '待机中'
+            };
+            
+            // 显示加载状态
+            showNotification('正在订阅设备主题...', 'info');
+            
+            // 订阅新设备的主题，只有订阅成功才添加设备
+            client.subscribe(deviceTopic, {qos: 1}, (err) => {
+                if (err) {
+                    showNotification(`订阅失败: ${err.message}`, 'error');
+                } else {
+                    // 订阅成功，添加设备到列表
+                    devices.push(newDevice);
+                    renderDevices();
+                    
+                    addMessage('系统', `已成功订阅主题: ${deviceTopic}`, 'system');
+                    closeAddDeviceModal();
+                    showNotification(`设备 "${newDevice.name}" 已添加`, 'success');
+                }
+            });
+        }
+        
+        function subscribeToDeviceTopic(topic) {
+            client.subscribe(topic, {qos: 1}, (err) => {
+                if (err) {
+                    showNotification(`订阅失败: ${err.message}`, 'error');
+                } else {
+                    addMessage('系统', `已成功订阅主题: ${topic}`, 'system');
+                }
+            });
+        }
+        
+        function updateDeviceStatus(deviceId, status) {
+            const device = devices.find(d => d.id === deviceId);
+            if (device) {
+                device.status = status;
+                device.lastSeen = new Date();
+                
+                // 更新设备卡片UI
+                const deviceCard = document.getElementById(`device-${deviceId}`);
+                if (deviceCard) {
+                    const statusIndicator = deviceCard.querySelector('.device-status-indicator');
+                    const statusText = deviceCard.querySelector('.device-status-text');
+                    
+                    if (status === 'online' || status === 'on') {
+                        statusIndicator.className = 'device-status-indicator online';
+                        statusText.textContent = '在线';
+                        statusText.className = 'text-xs font-medium text-secondary';
+                    } else if (status === 'off') {
+                        statusIndicator.className = 'device-status-indicator online';
+                        statusText.textContent = '在线（已关闭）';
+                        statusText.className = 'text-xs font-medium text-secondary';
+                    } else {
+                        statusIndicator.className = 'device-status-indicator offline';
+                        statusText.textContent = '离线';
+                        statusText.className = 'text-xs font-medium text-gray-400';
+                    }
+                    
+                    // 更新开关状态
+                    const toggleSwitch = deviceCard.querySelector('.toggle-switch input');
+                    if (toggleSwitch) {
+                        toggleSwitch.checked = status === 'on';
+                    }
+                    
+                    // 更新音量滑块状态
+                    const volumeSlider = deviceCard.querySelector('.volume-slider');
+                    if (volumeSlider) {
+                        volumeSlider.disabled = status !== 'on';
+                    }
+                }
+            }
+        }
+        
+        function updateDeviceVolume(deviceId, volume) {
+            const device = devices.find(d => d.id === deviceId);
+            if (device) {
+                device.volume = volume;
+                
+                // 更新设备卡片UI
+                const deviceCard = document.getElementById(`device-${deviceId}`);
+                if (deviceCard) {
+                    const volumeSlider = deviceCard.querySelector('.volume-slider');
+                    const volumeValue = deviceCard.querySelector('.volume-value');
+                    
+                    if (volumeSlider) {
+                        volumeSlider.value = volume;
+                    }
+                    
+                    if (volumeValue) {
+                        volumeValue.textContent = `${volume}%`;
+                    }
+                }
+            }
+        }
+        
+        function updateDeviceStatusInfo(deviceId, statusInfo) {
+            const device = devices.find(d => d.id === deviceId);
+            if (device) {
+                device.statusInfo = statusInfo;
+                
+                // 更新设备卡片UI
+                const deviceCard = document.getElementById(`device-${deviceId}`);
+                if (deviceCard) {
+                    const statusInfoElement = deviceCard.querySelector('.device-status-info');
+                    
+                    if (statusInfoElement) {
+                        statusInfoElement.textContent = statusInfo;
+                    }
+                }
+            }
+        }
+        
+        function toggleDeviceStatus(deviceId) {
+            const device = devices.find(d => d.id === deviceId);
+            if (device && device.status !== 'offline') {
+                const newStatus = device.status === 'on' ? 'off' : 'on';
+                
+                // 发布消息
+                if (client && client.connected) {
+                    client.publish(device.topic, JSON.stringify({
+                        command: 'toggle',
+                        status: newStatus
+                    }));
+                    
+                    // 本地更新状态
+                    updateDeviceStatus(device.id, newStatus);
+                    
+                    // 记录操作到消息日志
+                    addMessage(device.topic, `设备状态已切换为: ${newStatus}`, 'outgoing');
+                }
+            }
+        }
+        
+        function setDeviceVolume(deviceId, volume) {
+            const device = devices.find(d => d.id === deviceId);
+            if (device && device.status === 'on') {
+                // 发布消息
+                if (client && client.connected) {
+                    client.publish(device.topic, JSON.stringify({
+                        command: 'setVolume',
+                        volume: volume
+                    }));
+                    
+                    // 本地更新音量
+                    updateDeviceVolume(device.id, volume);
+                    
+                    // 记录操作到消息日志
+                    addMessage(device.topic, `音量已设置为: ${volume}%`, 'outgoing');
+                }
+            }
+        }
+        
+        function removeDevice(deviceId) {
+            const device = devices.find(d => d.id === deviceId);
+            if (device) {
+                if (client && client.connected) {
+                    // 取消订阅
+                    client.unsubscribe(device.topic);
+                }
+                
+                // 从数组中移除设备
+                devices = devices.filter(d => d.id !== deviceId);
+                
+                // 清除离线计时器
+                if (deviceStatusTimers[deviceId]) {
+                    clearTimeout(deviceStatusTimers[deviceId]);
+                    delete deviceStatusTimers[deviceId];
+                }
+                
+                // 重新渲染设备列表
+                renderDevices();
+                showNotification(`设备 "${device.name}" 已移除`, 'info');
+            }
+        }
+        
+        function renderDevices() {
+            const devicesGrid = document.getElementById('devicesGrid');
+            
+            if (devices.length === 0) {
+                devicesGrid.innerHTML = `
+                    <div class="text-center text-gray-400 italic py-12 col-span-full">
+                        <div class="w-16 h-16 mx-auto mb-4 bg-primary/10 rounded-full flex items-center justify-center">
+                            <i class="fa fa-plug text-primary text-2xl"></i>
+                        </div>
+                        <p>尚未添加任何设备</p>
+                        <p class="text-xs mt-2">连接MQTT后，点击"添加设备"按钮添加您的物联网设备</p>
+                    </div>
+                `;
+                return;
+            }
+            
+            devicesGrid.innerHTML = '';
+            
+            devices.forEach(device => {
+                const lastSeenText = device.lastSeen 
+                    ? new Date(device.lastSeen).toLocaleTimeString() 
+                    : '从未';
+                
+                let statusClass, statusText, switchDisabled = false;
+                
+                if (device.status === 'online' || device.status === 'on') {
+                    statusClass = 'online';
+                    statusText = '在线';
+                } else if (device.status === 'off') {
+                    statusClass = 'online';
+                    statusText = '在线（已关闭）';
+                } else {
+                    statusClass = 'offline';
+                    statusText = '离线';
+                    switchDisabled = true;
+                }
+                
+                const deviceCard = document.createElement('div');
+                deviceCard.id = `device-${device.id}`;
+                deviceCard.className = 'bg-dark-light rounded-xl shadow-lg p-5 card-hover transition-all';
+                deviceCard.innerHTML = `
+                    <div class="flex justify-between items-start mb-4">
+                        <div>
+                            <div class="flex items-center">
+                                <div class="device-status-indicator ${statusClass}"></div>
+                                <span class="device-status-text text-xs font-medium ${statusClass === 'online' ? 'text-secondary' : statusClass === 'offline' ? 'text-gray-400' : 'text-warning'}">
+                                    ${statusText}
+                                </span>
+                            </div>
+                            <h3 class="text-lg font-semibold mt-1">${device.name}</h3>
+                            <p class="text-xs text-gray-400">${device.topic}</p>
+                        </div>
+                        <div class="relative">
+                            <button class="text-gray-400 hover:text-white transition-colors" onclick="showDeviceMenu('${device.id}')">
+                                <i class="fa fa-ellipsis-v"></i>
+                            </button>
+                            <div id="deviceMenu-${device.id}" class="absolute right-0 mt-2 w-48 bg-dark-light rounded-lg shadow-lg py-1 z-10 hidden" onclick="event.stopPropagation();">
+                                <a href="#" onclick="event.preventDefault(); removeDevice('${device.id}')" class="block px-4 py-2 text-sm text-gray-300 hover:bg-primary/20 hover:text-white">
+                                    <i class="fa fa-trash mr-2"></i> 删除设备
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="mb-4">
+                        <div class="flex justify-between items-center">
+                            <span class="text-sm text-gray-light">设备分组</span>
+                            <span class="text-sm font-medium text-primary">${device.group}</span>
+                        </div>
+                        <div class="flex justify-between items-center mt-2">
+                            <span class="text-sm text-gray-light">最后在线</span>
+                            <span class="text-sm font-medium">${lastSeenText}</span>
+                        </div>
+                    </div>
+                    
+                    <div class="flex justify-between items-center pt-4 border-t border-gray-700 mb-4">
+                        <span class="text-sm font-medium">设备开关</span>
+                        <label class="toggle-switch">
+                            <input type="checkbox" ${device.status === 'on' ? 'checked' : ''} ${switchDisabled ? 'disabled' : ''} onchange="toggleDeviceStatus('${device.id}')">
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                    
+                    <div class="pt-2 mb-4">
+                        <div class="flex justify-between items-center mb-1">
+                            <span class="text-sm font-medium">音量控制</span>
+                            <span class="text-sm font-medium volume-value">${device.volume}%</span>
+                        </div>
+                        <input type="range" min="0" max="100" value="${device.volume}" 
+                            class="volume-slider w-full" oninput="setDeviceVolume('${device.id}', this.value)"
+                            ${switchDisabled ? 'disabled' : ''}>
+                    </div>
+                    
+                    <div class="pt-4 border-t border-gray-700">
+                        <div class="flex justify-between items-center">
+                            <span class="text-sm font-medium">当前状态</span>
+                            <span class="text-sm font-medium device-status-info ${device.status === 'off' ? 'text-gray-400' : ''}">
+                                ${device.status === 'off' ? '已关闭' : device.statusInfo}
+                            </span>
+                        </div>
+                    </div>
+                `;
+                
+                devicesGrid.appendChild(deviceCard);
+            });
+        }
+        
+        function showDeviceMenu(deviceId) {
+            // 先隐藏所有设备菜单
+            document.querySelectorAll('[id^="deviceMenu-"]').forEach(menu => {
+                menu.classList.add('hidden');
+            });
+            
+            // 显示当前设备菜单
+            const menu = document.getElementById(`deviceMenu-${deviceId}`);
+            if (menu) {
+                menu.classList.remove('hidden');
+            }
+            
+            // 点击其他地方关闭菜单
+            document.addEventListener('click', closeDeviceMenus);
+        }
+        
+        function closeDeviceMenus(event) {
+            document.querySelectorAll('[id^="deviceMenu-"]').forEach(menu => {
+                if (!menu.contains(event.target) && 
+                    !document.querySelector(`button[onclick="showDeviceMenu('${menu.id.split('-')[2]}')"]`).contains(event.target) && 
+                    !document.querySelector(`#device-${menu.id.split('-')[2]}`).contains(event.target)) {
+                    menu.classList.add('hidden');
+                }
+            });
+        }
+        
+        function addMessage(source, content, type) {
+            const messagesDiv = document.getElementById('messages');
+            const now = new Date();
+            const timeString = now.toLocaleTimeString();
+            
+            // 如果消息区域显示空状态提示，则清空
+            if (messagesDiv.innerHTML.includes('暂无消息')) {
+                messagesDiv.innerHTML = '';
+            }
+            
+            let messageClass = 'bg-primary/10 border-l-4 border-primary';
+            let sourceClass = 'text-primary';
+            
+            if (type === 'outgoing') {
+                messageClass = 'bg-secondary/10 border-l-4 border-secondary';
+                sourceClass = 'text-secondary';
+            } else if (type === 'system') {
+                messageClass = 'bg-gray-700/50 border-l-4 border-gray-500';
+                sourceClass = 'text-gray-300';
+            }
+            
+            const messageElement = document.createElement('div');
+            messageElement.className = `p-3 ${messageClass} rounded-lg shadow-sm transition-all text-sm`;
+            messageElement.innerHTML = `
+                <div class="flex justify-between items-start mb-1">
+                    <span class="font-medium ${sourceClass}">${source}</span>
+                    <span class="text-xs text-gray-400">${timeString}</span>
+                </div>
+                <p>${escapeHTML(content)}</p>
+            `;
+            
+            messagesDiv.appendChild(messageElement);
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+            
+            // 添加动画效果
+            setTimeout(() => {
+                messageElement.classList.add('opacity-100');
+            }, 10);
+        }
+        
+        function clearMessages() {
+            document.getElementById('messages').innerHTML = `
+                <div class="text-center text-gray-400 italic text-sm py-6">
+                    暂无消息
+                </div>
+            `;
+            messagesCount = 0;
+            document.getElementById('messageCount').textContent = messagesCount;
+        }
+        
+        function updateConnectionStatus(status) {
+            const statusIcon = document.getElementById('statusIcon');
+            const statusText = document.getElementById('statusText');
+            const connectBtn = document.getElementById('connectBtn');
+            const disconnectBtn = document.getElementById('disconnectBtn');
+            
+            switch(status) {
+                case 'connecting':
+                    statusIcon.className = 'w-3 h-3 rounded-full bg-warning animate-pulse mr-2';
+                    statusText.textContent = '连接中...';
+                    statusText.className = 'text-sm font-medium text-warning';
+                    connectBtn.disabled = true;
+                    disconnectBtn.disabled = true;
+                    break;
+                    
+                case 'connected':
+                    statusIcon.className = 'w-3 h-3 rounded-full bg-secondary mr-2';
+                    statusText.textContent = '已连接';
+                    statusText.className = 'text-sm font-medium text-secondary';
+                    connectBtn.disabled = true;
+                    disconnectBtn.disabled = false;
+                    break;
+                    
+                case 'reconnecting':
+                    statusIcon.className = 'w-3 h-3 rounded-full bg-warning animate-pulse mr-2';
+                    statusText.textContent = '重连中...';
+                    statusText.className = 'text-sm font-medium text-warning';
+                    connectBtn.disabled = true;
+                    disconnectBtn.disabled = false;
+                    break;
+                    
+                case 'disconnected':
+                    statusIcon.className = 'w-3 h-3 rounded-full bg-gray-500 mr-2';
+                    statusText.textContent = '未连接';
+                    statusText.className = 'text-sm font-medium text-gray-light';
+                    connectBtn.disabled = false;
+                    disconnectBtn.disabled = true;
+                    document.getElementById('connectionInfo').classList.add('hidden');
+                    break;
+            }
+        }
+        
+        function startConnectionTimer() {
+            stopConnectionTimer();
+            
+            connectionTimer = setInterval(() => {
+                if (connectionStartTime) {
+                    const now = new Date();
+                    const diff = now - connectionStartTime;
+                    
+                    const hours = Math.floor(diff / 3600000);
+                    const minutes = Math.floor((diff % 3600000) / 60000);
+                    const seconds = Math.floor((diff % 60000) / 1000);
+                    
+                    document.getElementById('connectionTime').textContent = 
+                        `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+                }
+            }, 1000);
+        }
+        
+        function stopConnectionTimer() {
+            if (connectionTimer) {
+                clearInterval(connectionTimer);
+                connectionTimer = null;
+            }
+        }
+        
+        function showNotification(message, type = 'info') {
+            // 创建通知元素
+            const notification = document.createElement('div');
+            
+            // 设置样式和类
+            let bgColor, textColor, icon;
+            switch(type) {
+                case 'success':
+                    bgColor = 'bg-secondary/90';
+                    textColor = 'text-white';
+                    icon = 'fa-check-circle';
+                    break;
+                case 'error':
+                    bgColor = 'bg-danger/90';
+                    textColor = 'text-white';
+                    icon = 'fa-exclamation-circle';
+                    break;
+                case 'warning':
+                    bgColor = 'bg-warning/90';
+                    textColor = 'text-white';
+                    icon = 'fa-exclamation-triangle';
+                    break;
+                default:
+                    bgColor = 'bg-primary/90';
+                    textColor = 'text-white';
+                    icon = 'fa-info-circle';
+            }
+            
+            notification.className = `fixed top-4 right-4 ${bgColor} ${textColor} py-3 px-5 rounded-lg shadow-lg z-50 flex items-center transform transition-all duration-300 translate-x-full opacity-0`;
+            notification.innerHTML = `
+                <i class="fa ${icon} mr-2"></i>
+                <span>${message}</span>
+            `;
+            
+            // 添加到页面
+            document.body.appendChild(notification);
+            
+            // 显示通知
+            setTimeout(() => {
+                notification.classList.remove('translate-x-full', 'opacity-0');
+            }, 10);
+            
+            // 自动关闭
+            setTimeout(() => {
+                notification.classList.add('translate-x-full', 'opacity-0');
+                setTimeout(() => {
+                    document.body.removeChild(notification);
+                }, 300);
+            }, 3000);
+        }
+        
+        function escapeHTML(str) {
+            return str
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#039;');
+        }
+        
+        // 页面加载时初始化
+        document.addEventListener('DOMContentLoaded', () => {
+            // 初始化设备列表
+            renderDevices();
+            
+            // 搜索设备
+            document.getElementById('deviceSearch').addEventListener('input', (e) => {
+                const searchTerm = e.target.value.toLowerCase();
+                const deviceCards = document.querySelectorAll('[id^="device-"]');
+                
+                deviceCards.forEach(card => {
+                    const deviceName = card.querySelector('h3').textContent.toLowerCase();
+                    const deviceTopic = card.querySelector('p').textContent.toLowerCase();
+                    const deviceGroup = card.querySelector('.text-primary').textContent.toLowerCase();
+                    
+                    if (deviceName.includes(searchTerm) || deviceTopic.includes(searchTerm) || deviceGroup.includes(searchTerm)) {
+                        card.classList.remove('hidden');
+                    } else {
+                        card.classList.add('hidden');
+                    }
+                });
+            });
+        });
+    </script>
+</body>
+</html>
